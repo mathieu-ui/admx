@@ -24,22 +24,36 @@ fi
 # Create the container
 ssh pve "pct create $container_vmid local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst --hostname '$container_name' --password 'rftgyrftgy' --memory 1024 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=10.0.0.254,ip=$container_ip/24,type=veth --storage local-vm --rootfs local-lvm:4 --ostype debian --unprivileged 1"
 
+# Start the container
+ssh pve "pct start $container_vmid"
+
 # Modify the firehol configuration on the PVE server
-ssh pve "echo 'dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' >> /etc/firehol/firehol.conf"
-ssh pve "systemctl restart firehol"
+#ssh pve "echo 'dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' >> /etc/firehol/firehol.conf"
+#ssh pve "systemctl restart firehol"
 
 # Configure the Nginx reverse proxy on the PVE server
 ssh pve "echo 'server {
     listen 80;
-    server_name $container_name.example.com;
+    server_name $container_name.admx.osef $container_name;
     location / {
         proxy_pass http://$container_name;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
-}' > /etc/nginx/conf.d/$container_name.conf"
-ssh pve "systemctl reload nginx"
+    access_log /var/log/nginx/$container_name.admx.osef-access.log;
+    error_log  /var/log/nginx/$container_name.admx.osef-error.log; 
+    location ^~ /.well-known/acme-challenge/ { default_type "text/plain"; root /var/www/certbot/; }
+}' > /etc/nginx/sites-available/$container_name.admx.osef"
+
+# Create a symlink for the Nginx configuration
+ssh pve "ln -s /etc/nginx/sites-available/$container_name.admx.osef /etc/nginx/sites-available/$container_name.admx.osef"
+
+# Generate a self-signed SSL certificate
+ssh pve "make-ssl-cert generate-default-snakeoil"
+
+# Restart the Nginx service
+ssh pve "systemctl restart nginx"
 
 # Install Apache2 on the newly created container
 ssh pve "pct exec $container_vmid -- apt-get update"
