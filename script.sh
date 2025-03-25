@@ -26,20 +26,16 @@ ssh pve "pct create $container_vmid local:vztmpl/debian-12-standard_12.7-1_amd64
 
 # Start the container
 ssh pve "pct start $container_vmid"
-
 # Modify the firehol configuration on the PVE server
-#ssh pve "echo 'dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' >> /etc/firehol/firehol.conf"
-#ssh pve "systemctl restart firehol"
+ssh pve "echo 'dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' >> /etc/firehol/firehol.conf"
+ssh pve "systemctl restart firehol"
 
 # Configure the Nginx reverse proxy on the PVE server
 ssh pve "echo 'server {
     listen 80;
     server_name $container_name.admx.osef $container_name;
     location / {
-        proxy_pass http://$container_name;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_pass http://$container_ip;
     }
     access_log /var/log/nginx/$container_name.admx.osef-access.log;
     error_log  /var/log/nginx/$container_name.admx.osef-error.log; 
@@ -47,7 +43,7 @@ ssh pve "echo 'server {
 }' > /etc/nginx/sites-available/$container_name.admx.osef"
 
 # Create a symlink for the Nginx configuration
-ssh pve "ln -s /etc/nginx/sites-available/$container_name.admx.osef /etc/nginx/sites-available/$container_name.admx.osef"
+ssh pve "ln -s /etc/nginx/sites-available/$container_name.admx.osef /etc/nginx/sites-enabled/$container_name.admx.osef"
 
 # Generate a self-signed SSL certificate
 ssh pve "make-ssl-cert generate-default-snakeoil"
@@ -60,4 +56,4 @@ ssh pve "pct exec $container_vmid -- apt-get update"
 ssh pve "pct exec $container_vmid -- apt-get install -y apache2"
 
 # Configure /etc/hosts on your computer
-echo "$(ssh pve "pct exec $container_vmid -- hostname -i") $container_name.example.com" | sudo tee -a /etc/hosts
+echo "127.0.0.1 $container_name.admx.osef" | sudo tee -a /etc/hosts
