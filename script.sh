@@ -22,15 +22,22 @@ if ! ssh pve "pveam list local | grep 'debian-12-standard'"; then
 fi
 
 # Create the container
-ssh pve "pct create $container_vmid local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst --hostname '$container_name' --password 'rftgyrftgy' --memory 1024 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=10.0.0.254,ip=$container_ip/24,type=veth --storage local-vm --rootfs local-lvm:4 --ostype debian --unprivileged 1"
+
+echo "Creating the container..."
+
+ssh pve "pct create $container_vmid local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst --hostname '$container_name' --password 'rftgyrftgy' --memory 1024 --net0 name=eth0,bridge=vmbr0,firewall=1,gw=10.0.0.254,ip=$container_ip/24,type=veth --storage local-vm --rootfs local-lvm:4 --ostype debian --unprivileged 1" > /dev/null
 
 # Start the container
 ssh pve "pct start $container_vmid"
+
 # Modify the firehol configuration on the PVE server
-ssh pve "echo 'dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' >> /etc/firehol/firehol.conf"
+ssh pve "sed -i '/interface4 vmbr0 vmlan src/i dnat4 to \"$container_ip\":22 inface enp0s3 proto tcp dport $container_port' /etc/firehol/firehol.conf"
 ssh pve "systemctl restart firehol"
 
 # Configure the Nginx reverse proxy on the PVE server
+
+echo "Configuring the revers proxy..."
+
 ssh pve "echo 'server {
     listen 80;
     server_name $container_name.admx.osef $container_name;
@@ -52,8 +59,14 @@ ssh pve "make-ssl-cert generate-default-snakeoil"
 ssh pve "systemctl restart nginx"
 
 # Install Apache2 on the newly created container
-ssh pve "pct exec $container_vmid -- apt-get update"
-ssh pve "pct exec $container_vmid -- apt-get install -y apache2"
+
+echo "Installing WebService..."
+
+ssh pve "pct exec $container_vmid -- apt-get update" > /dev/null
+ssh pve "pct exec $container_vmid -- apt-get install -y apache2" > /dev/null
 
 # Configure /etc/hosts on your computer
 echo "127.0.0.1 $container_name.admx.osef" | sudo tee -a /etc/hosts
+
+echo "You can now acces to webservice using http://$container_name.admx.osef:8080"
+echo "You can now ssh the container using 'ssh '"
