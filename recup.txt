@@ -1,0 +1,10 @@
+setxkbmap fr
+sudo mount /dev/sda2 /mnt
+sudo mount /dev/sda1 /mnt/boot/efi
+for i in dev sys proc dev/pts run sys/firmware/efi/efivars; do echo $i; sudo mount -B /$i /mnt/$i; done
+chroot /mnt/
+sudo grub-install /dev/sda
+sudo apt install --reinstall linux-image-6.1.0-33-amd64
+passwd root 
+passwd alex
+passwd steve
