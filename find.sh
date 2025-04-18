@@ -29,7 +29,7 @@ Options:
   -i, --inside     Search inside files
   -l, --locate     Use locate instead of find
   -o, --only       With -i: only search inside files (skip name search)
-  -p, --path PATH  Force search in PATH
+  -p, --path PATH  Force search in PATH (follows symlinks)
   -u, --update     Update the locate/plocate database and exit
 EOF
 }
@@ -78,11 +78,10 @@ fi
 # Update database if requested
 if [ "$UPDATE_DB" -eq 1 ]; then
   update_db_cmd
-  # exit if no further args
   [ $# -eq 0 ] && exit 0
 fi
 
-# Determine which locate command to use
+# Determine locate command if requested
 if [ "$LOCATE_MODE" -eq 1 ]; then
   if command -v locate &>/dev/null; then
     LOC_CMD=locate
@@ -94,15 +93,21 @@ if [ "$LOCATE_MODE" -eq 1 ]; then
   fi
 fi
 
-# Determine search path: forced or first existing directory
+# Determine search path: forced or first existing directory (including symlinks to dirs)
 if [ "$PATH_FLAG" -eq 0 ]; then
   for arg in "$@"; do
-    if [ -d "$arg" ]; then
+    if [ -d "$arg" ] || [ -L "$arg" -a -d "$(readlink -f "$arg")" ]; then
       SEARCH_PATH="$arg"; PATH_FLAG=1; break
     fi
   done
 fi
 [ -z "$SEARCH_PATH" ] && SEARCH_PATH="$PWD"
+
+# Validate that SEARCH_PATH exists and is a directory (following symlinks)
+if [ ! -d "$SEARCH_PATH" ] && ! { [ -L "$SEARCH_PATH" ] && [ -d "$(readlink -f "$SEARCH_PATH")" ]; }; then
+  echo "Error: search path '$SEARCH_PATH' not found or not a directory." >&2
+  exit 1
+fi
 
 # Build search terms, skipping the used directory
 TERMS=()
@@ -114,21 +119,18 @@ for arg in "$@"; do
   TERMS+=("$arg")
 done
 
-# Require at least one term
 if [ ${#TERMS[@]} -eq 0 ]; then
   usage; exit 1
 fi
 
-# Prepare temp file for errors
 tmp_err=$(mktemp)
 
-# Name-based search results
+# Name-based search
 NAME_RESULTS=()
 if [ "$ONLY_INSIDE" -eq 0 ]; then
   if [ "$LOCATE_MODE" -eq 1 ]; then
-    # Use selected locate command
     CMD=("$LOC_CMD" -i "${TERMS[0]}")
-    for ((i=1; i<${#TERMS[@]}; i++)); do
+    for ((i=1;i<${#TERMS[@]};i++)); do
       CMD+=( '|' "grep -i -- '${TERMS[i]}'" )
     done
     if [ "$SHOW_ERR" -eq 1 ]; then
@@ -137,8 +139,7 @@ if [ "$ONLY_INSIDE" -eq 0 ]; then
       mapfile -t NAME_RESULTS < <(eval "${CMD[*]}" 2> "$tmp_err")
     fi
   else
-    # Use find
-    FIND_CMD=(find "$SEARCH_PATH")
+    FIND_CMD=(find -L "$SEARCH_PATH")
     for t in "${TERMS[@]}"; do
       if [[ "$t" == */* ]]; then
         FIND_CMD+=( -ipath "*${t}*" )
@@ -155,11 +156,11 @@ if [ "$ONLY_INSIDE" -eq 0 ]; then
   fi
 fi
 
-# Inside-file search results
+# Content search
 INSIDE_RESULTS=()
 if [ "$INSIDE" -eq 1 ]; then
-  CMD="find \"$SEARCH_PATH\" -type f -print0 | xargs -0 grep -I -i -l -- '${TERMS[0]}'"
-  for ((i=1; i<${#TERMS[@]}; i++)); do
+  CMD="find -L \"$SEARCH_PATH\" -type f -print0 | xargs -0 grep -I -i -l -- '${TERMS[0]}'"
+  for ((i=1;i<${#TERMS[@]};i++)); do
     CMD+=" | xargs grep -I -i -l -- '${TERMS[i]}'"
   done
   if [ "$SHOW_ERR" -eq 1 ]; then
@@ -169,7 +170,7 @@ if [ "$INSIDE" -eq 1 ]; then
   fi
 fi
 
-# Merge, sort uniquely, display
+# Merge, dedupe, output
 ALL=("${NAME_RESULTS[@]}" "${INSIDE_RESULTS[@]}")
 IFS=$'\n' ALL=( $(printf "%s\n" "${ALL[@]}" | sort -u) )
 unset IFS
